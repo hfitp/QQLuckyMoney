@@ -1,20 +1,13 @@
 package me.veryyoung.qq.luckymoney;
 
 import android.app.Activity;
-import android.app.ActivityManager.RunningAppProcessInfo;
-import android.app.ActivityManager.RunningServiceInfo;
-import android.app.ActivityManager.RunningTaskInfo;
 import android.content.Context;
 import android.content.Intent;
-import android.content.pm.ApplicationInfo;
-import android.content.pm.PackageInfo;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.text.TextUtils;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
 import java.util.Random;
 
@@ -33,25 +26,36 @@ import static de.robv.android.xposed.XposedHelpers.findClass;
 import static de.robv.android.xposed.XposedHelpers.findFirstFieldByExactType;
 import static de.robv.android.xposed.XposedHelpers.getObjectField;
 import static de.robv.android.xposed.XposedHelpers.newInstance;
-import static de.robv.android.xposed.XposedHelpers.setObjectField;
+import static me.veryyoung.qq.luckymoney.HideModule.hideModule;
 
 
 public class Main implements IXposedHookLoadPackage {
 
-    private static final String QQ_PACKAGE_NAME = "com.tencent.mobileqq";
+    public static final String QQ_PACKAGE_NAME = "com.tencent.mobileqq";
     private static final String WECHAT_PACKAGE_NAME = "com.tencent.mm";
 
 
-    static long msgUid;
-    static String senderuin;
-    static String frienduin;
-    static int istroop;
-    static String selfuin;
-    static Context globalContext = null;
-    static Object HotChatManager = null;
-    static Object TicketManager;
+    private static long msgUid;
+    private static String senderuin;
+    private static String frienduin;
+    private static int istroop;
+    private static String selfuin;
+    private static Context globalContext = null;
+    private static Object HotChatManager = null;
+    private static Object TicketManager;
 
-    private void dohook(final XC_LoadPackage.LoadPackageParam loadPackageParam) {
+    private static String qqVersion = "";
+
+
+    private void dohook(final XC_LoadPackage.LoadPackageParam loadPackageParam) throws Throwable {
+
+        if (TextUtils.isEmpty(qqVersion)) {
+            Context context = (Context) callMethod(callStaticMethod(findClass("android.app.ActivityThread", null), "currentActivityThread", new Object[0]), "getSystemContext", new Object[0]);
+            String versionName = context.getPackageManager().getPackageInfo(loadPackageParam.packageName, 0).versionName;
+            log("Found QQ version:" + versionName);
+            qqVersion = versionName;
+            VersionParam.init(versionName);
+        }
 
         findAndHookMethod("com.tencent.mobileqq.app.MessageHandlerUtils", loadPackageParam.classLoader, "a",
                 "com.tencent.mobileqq.app.QQAppInterface",
@@ -102,7 +106,7 @@ public class Main implements IXposedHookLoadPackage {
                         requestUrl.append("&groupuin=" + senderuin);
                         requestUrl.append("&authkey=" + authkey);
 
-                        Class qqplugin = findClass("com.tenpay.android.qqplugin.a.p", walletClassLoader);
+                        Class qqplugin = findClass(VersionParam.QQPluginClass, walletClassLoader);
 
                         int random = Math.abs(new Random().nextInt()) % 16;
                         String reqText = (String) callStaticMethod(qqplugin, "a", globalContext, random, false, requestUrl.toString());
@@ -113,7 +117,8 @@ public class Main implements IXposedHookLoadPackage {
                         hongbaoRequestUrl.append("&skey_type=2");
                         hongbaoRequestUrl.append("&skey=" + callMethod(TicketManager, "getSkey", selfuin));
 
-                        Object pickObject = newInstance(findClass("com.tenpay.android.qqplugin.b.d", walletClassLoader), callStaticMethod(qqplugin, "a", globalContext));
+                        Class<?> walletClass = findClass("com.tenpay.android.qqplugin.b.d", walletClassLoader);
+                        Object pickObject = newInstance(walletClass, callStaticMethod(qqplugin, "a", globalContext));
                         if (PreferencesUtils.delay()) {
                             sleep(PreferencesUtils.delayTime());
                         }
@@ -155,26 +160,6 @@ public class Main implements IXposedHookLoadPackage {
 
         );
 
-
-        findAndHookMethod("com.tencent.mobileqq.activity.aio.item.QQWalletMsgItemBuilder", loadPackageParam.classLoader, "a", "mkh", "com.tencent.mobileqq.data.MessageForQQWalletMsg", "com.tencent.mobileqq.activity.aio.OnLongClickAndTouchListener",
-                new XC_MethodHook() {
-                    int issend;
-
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        issend = (int) getObjectField(param.args[1], "issend");
-                        if (issend != 1) {
-                            setObjectField(param.args[1], "issend", 1);
-                        }
-                    }
-
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                        setObjectField(param.args[1], "issend", issend);
-                    }
-                }
-
-        );
     }
 
 
@@ -226,118 +211,6 @@ public class Main implements IXposedHookLoadPackage {
             });
         }
 
-    }
-
-
-    private void hideModule(XC_LoadPackage.LoadPackageParam loadPackageParam) {
-        findAndHookMethod("android.app.ApplicationPackageManager", loadPackageParam.classLoader, "getInstalledApplications", int.class, new XC_MethodHook() {
-            @Override
-            protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                List<ApplicationInfo> applicationList = (List) param.getResult();
-                List<ApplicationInfo> resultapplicationList = new ArrayList<>();
-                for (ApplicationInfo applicationInfo : applicationList) {
-                    String packageName = applicationInfo.packageName;
-                    if (isTarget(packageName)) {
-                        log("Hid package: " + packageName);
-                    } else {
-                        resultapplicationList.add(applicationInfo);
-                    }
-                }
-                param.setResult(resultapplicationList);
-            }
-        });
-        findAndHookMethod("android.app.ApplicationPackageManager", loadPackageParam.classLoader, "getInstalledPackages", int.class, new XC_MethodHook() {
-            @Override
-            protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                List<PackageInfo> packageInfoList = (List) param.getResult();
-                List<PackageInfo> resultpackageInfoList = new ArrayList<>();
-
-                for (PackageInfo packageInfo : packageInfoList) {
-                    String packageName = packageInfo.packageName;
-                    if (isTarget(packageName)) {
-                        log("Hid package: " + packageName);
-                    } else {
-                        resultpackageInfoList.add(packageInfo);
-                    }
-                }
-                param.setResult(resultpackageInfoList);
-            }
-        });
-        findAndHookMethod("android.app.ApplicationPackageManager", loadPackageParam.classLoader, "getPackageInfo", String.class, int.class, new XC_MethodHook() {
-            @Override
-            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                String packageName = (String) param.args[0];
-                if (isTarget(packageName)) {
-                    param.args[0] = QQ_PACKAGE_NAME;
-                    log("Fake package: " + packageName + " as " + QQ_PACKAGE_NAME);
-                }
-            }
-        });
-        findAndHookMethod("android.app.ApplicationPackageManager", loadPackageParam.classLoader, "getApplicationInfo", String.class, int.class, new XC_MethodHook() {
-            @Override
-            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                String packageName = (String) param.args[0];
-                if (isTarget(packageName)) {
-                    param.args[0] = QQ_PACKAGE_NAME;
-                    log("Fake package: " + packageName + " as " + QQ_PACKAGE_NAME);
-                }
-            }
-        });
-        findAndHookMethod("android.app.ActivityManager", loadPackageParam.classLoader, "getRunningServices", int.class, new XC_MethodHook() {
-            @Override
-            protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                List<RunningServiceInfo> serviceInfoList = (List) param.getResult();
-                List<RunningServiceInfo> resultList = new ArrayList<>();
-
-                for (RunningServiceInfo runningServiceInfo : serviceInfoList) {
-                    String serviceName = runningServiceInfo.process;
-                    if (isTarget(serviceName)) {
-                        log("Hid service: " + serviceName);
-                    } else {
-                        resultList.add(runningServiceInfo);
-                    }
-                }
-                param.setResult(resultList);
-            }
-        });
-        findAndHookMethod("android.app.ActivityManager", loadPackageParam.classLoader, "getRunningTasks", int.class, new XC_MethodHook() {
-            @Override
-            protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                List<RunningTaskInfo> serviceInfoList = (List) param.getResult();
-                List<RunningTaskInfo> resultList = new ArrayList<>();
-
-                for (RunningTaskInfo runningTaskInfo : serviceInfoList) {
-                    String taskName = runningTaskInfo.baseActivity.flattenToString();
-                    if (isTarget(taskName)) {
-                        log("Hid task: " + taskName);
-                    } else {
-                        resultList.add(runningTaskInfo);
-                    }
-                }
-                param.setResult(resultList);
-            }
-        });
-        findAndHookMethod("android.app.ActivityManager", loadPackageParam.classLoader, "getRunningAppProcesses", new XC_MethodHook() {
-            @Override
-            protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                List<RunningAppProcessInfo> runningAppProcessInfos = (List) param.getResult();
-                List<RunningAppProcessInfo> resultList = new ArrayList<>();
-
-                for (RunningAppProcessInfo runningAppProcessInfo : runningAppProcessInfos) {
-                    String processName = runningAppProcessInfo.processName;
-                    if (isTarget(processName)) {
-                        log("Hid process: " + processName);
-                    } else {
-                        resultList.add(runningAppProcessInfo);
-                    }
-                }
-                param.setResult(resultList);
-            }
-        });
-    }
-
-    private boolean isTarget(String name) {
-        return name.contains("veryyoung") || name.contains("xposed");
     }
 
 
